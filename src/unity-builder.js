@@ -87,22 +87,33 @@ export async function buildSingleTarget({ projectPath, buildTarget, prNumber }) 
 
 async function processBuildOutput(buildOutputPath, buildTarget) {
   try {
-    const stats = await fs.stat(buildOutputPath);
+    // macOSビルドでは.appが自動的に追加される
+    let actualBuildPath = buildOutputPath;
+    if (buildTarget === 'OSXUniversal' || buildTarget === 'StandaloneOSX') {
+      const appPath = `${buildOutputPath}.app`;
+      try {
+        await fs.stat(appPath);
+        actualBuildPath = appPath;
+      } catch {
+        // .app拡張子がない場合は元のパスを使用
+      }
+    }
     
-    if (buildTarget.includes('Windows') || buildTarget === 'StandaloneWindows64') {
-      const zipPath = `${buildOutputPath}.zip`;
-      await createZip(buildOutputPath, zipPath);
+    const stats = await fs.stat(actualBuildPath);
+    
+    if (buildTarget.includes('Windows') || buildTarget === 'StandaloneWindows64' || buildTarget === 'Win64') {
+      const zipPath = `${actualBuildPath}.zip`;
+      await createZip(actualBuildPath, zipPath);
       return zipPath;
-    } else if (buildTarget === 'StandaloneOSX') {
-      const zipPath = `${buildOutputPath}.zip`;
-      await createZip(buildOutputPath, zipPath);
+    } else if (buildTarget === 'StandaloneOSX' || buildTarget === 'OSXUniversal') {
+      const zipPath = `${actualBuildPath}.zip`;
+      await createZip(actualBuildPath, zipPath);
       return zipPath;
     } else if (buildTarget === 'WebGL') {
-      const zipPath = `${buildOutputPath}.zip`;
-      await createZip(buildOutputPath, zipPath);
-      return zipPath;
+      // WebGLの場合はzipにせず、フォルダのパスをそのまま返す（プレビュー用）
+      return actualBuildPath;
     } else {
-      return buildOutputPath;
+      return actualBuildPath;
     }
   } catch (error) {
     console.error(`Failed to process build output: ${error.message}`);
