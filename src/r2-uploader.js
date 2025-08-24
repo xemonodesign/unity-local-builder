@@ -25,17 +25,30 @@ export async function uploadToR2({ buildResults, filePath, prNumber, branch }) {
     }
 
     try {
-      const uploadUrl = await uploadSingleFile({
-        filePath: buildResult.path,
-        prNumber,
-        branch,
-        target: buildResult.target
-      });
+      let uploadResult;
+      
+      // WebGLの場合は特別な処理
+      if (buildResult.target === 'WebGL') {
+        uploadResult = await uploadWebGLBuild({
+          buildPath: buildResult.path,
+          prNumber,
+          branch,
+          target: buildResult.target
+        });
+      } else {
+        const uploadUrl = await uploadSingleFile({
+          filePath: buildResult.path,
+          prNumber,
+          branch,
+          target: buildResult.target
+        });
+        uploadResult = { downloadUrl: uploadUrl };
+      }
 
       return {
         target: buildResult.target,
         success: true,
-        downloadUrl: uploadUrl
+        ...uploadResult
       };
     } catch (error) {
       console.error(`Failed to upload ${buildResult.target}:`, error.message);
@@ -53,6 +66,97 @@ export async function uploadToR2({ buildResults, filePath, prNumber, branch }) {
   console.log(`✅ Successfully uploaded ${successCount}/${uploadResults.length} builds`);
   
   return uploadResults;
+}
+
+export async function uploadWebGLBuild({ buildPath, prNumber, branch, target }) {
+  const r2Client = new S3Client({
+    region: 'auto',
+    endpoint: process.env.R2_ENDPOINT,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    },
+  });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseKey = `builds/pr-${prNumber}/${branch}/${timestamp}/${target}`;
+  
+  console.log(`📤 Uploading WebGL build directory to R2: ${baseKey}/`);
+
+  try {
+    const filePaths = await getFilesRecursively(buildPath);
+    const uploadPromises = [];
+
+    for (const filePath of filePaths) {
+      const relativePath = path.relative(buildPath, filePath);
+      const key = `${baseKey}/${relativePath}`;
+      
+      const fileContent = await fs.readFile(filePath);
+      const contentType = getContentType(relativePath);
+      
+      const uploadParams = {
+        Bucket: process.env.R2_BUCKET_NAME,
+        Key: key,
+        Body: fileContent,
+        ContentType: contentType,
+      };
+
+      uploadPromises.push(r2Client.send(new PutObjectCommand(uploadParams)));
+    }
+
+    await Promise.all(uploadPromises);
+    
+    const previewUrl = `${process.env.R2_PUBLIC_URL}/${baseKey}/index.html`;
+    console.log(`✅ WebGL build uploaded successfully. Preview: ${previewUrl}`);
+    
+    return { 
+      previewUrl: previewUrl,
+      downloadUrl: previewUrl // 後方互換性のため
+    };
+  } catch (error) {
+    console.error('Failed to upload WebGL build to R2:', error);
+    throw new Error(`WebGL R2 upload failed: ${error.message}`);
+  }
+}
+
+async function getFilesRecursively(dirPath) {
+  const filePaths = [];
+  
+  async function walkDir(currentPath) {
+    const entries = await fs.readdir(currentPath, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      
+      if (entry.isDirectory()) {
+        await walkDir(fullPath);
+      } else if (entry.isFile()) {
+        filePaths.push(fullPath);
+      }
+    }
+  }
+  
+  await walkDir(dirPath);
+  return filePaths;
+}
+
+function getContentType(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  const contentTypes = {
+    '.html': 'text/html',
+    '.js': 'application/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.json': 'application/json',
+    '.wasm': 'application/wasm',
+    '.data': 'application/octet-stream',
+    '.unityweb': 'application/octet-stream'
+  };
+  return contentTypes[ext] || 'application/octet-stream';
 }
 
 export async function uploadSingleFile({ filePath, prNumber, branch, target = null }) {

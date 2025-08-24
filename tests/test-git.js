@@ -11,7 +11,8 @@ async function testGitClone() {
     const repoPath = await cloneRepository({
       cloneUrl: 'https://github.com/octocat/Hello-World.git',
       branch: 'master',
-      prNumber: 999
+      prNumber: 999,
+      repoName: 'octocat-Hello-World'
     });
 
     console.log('✅ Repository cloned successfully!');

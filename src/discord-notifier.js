@@ -62,14 +62,20 @@ export async function sendDiscordNotification({ type, pr, downloadUrl, buildResu
           }
         ];
 
-        // 成功したビルドのダウンロードリンク
+        // 成功したビルドのダウンロード・プレビューリンク
         if (successBuilds.length > 0) {
           const downloadLinks = successBuilds
-            .map(build => `🔗 [${build.target}](${build.downloadUrl})`)
+            .map(build => {
+              if (build.target === 'WebGL' && build.previewUrl) {
+                return `🎮 [${build.target} Preview](${build.previewUrl})`;
+              } else {
+                return `🔗 [${build.target}](${build.downloadUrl})`;
+              }
+            })
             .join('\n');
           
           fields.push({
-            name: '📥 Downloads',
+            name: '📥 Downloads & Previews',
             value: downloadLinks,
             inline: false
           });

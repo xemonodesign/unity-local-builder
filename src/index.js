@@ -34,9 +34,12 @@ app.post('/webhook', async (req, res) => {
     const { action, pull_request } = req.body;
     
     if (action === 'opened' || action === 'synchronize') {
+      // 早期にレスポンスを送信して、後続の非同期処理でエラーが発生してもHTTPエラーが出ないようにする
       res.status(200).send('Processing build');
       
-      try {
+      // 非同期でビルド処理を実行（レスポンス送信後）
+      setImmediate(async () => {
+        try {
         console.log(`Processing PR #${pull_request.number}: ${pull_request.title}`);
         
         await sendDiscordNotification({
@@ -47,7 +50,8 @@ app.post('/webhook', async (req, res) => {
         const repoPath = await cloneRepository({
           cloneUrl: pull_request.head.repo.clone_url,
           branch: pull_request.head.ref,
-          prNumber: pull_request.number
+          prNumber: pull_request.number,
+          repoName: pull_request.head.repo.full_name.replace('/', '-')
         });
 
         // 複数ビルドターゲットの処理
@@ -81,11 +85,14 @@ app.post('/webhook', async (req, res) => {
           pr: pull_request,
           error: error.message
         });
-      }
+        }
+      });
+    } else {
+      res.status(200).send('OK');
     }
+  } else {
+    res.status(200).send('OK');
   }
-  
-  res.status(200).send('OK');
 });
 
 app.listen(PORT, () => {
