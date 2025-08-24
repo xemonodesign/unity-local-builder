@@ -93,13 +93,26 @@ export async function uploadWebGLBuild({ buildPath, prNumber, branch, target }) 
       
       const fileContent = await fs.readFile(filePath);
       const contentType = getContentType(relativePath);
+      const contentEncoding = getContentEncoding(relativePath);
       
       const uploadParams = {
         Bucket: process.env.R2_BUCKET_NAME,
         Key: key,
         Body: fileContent,
         ContentType: contentType,
+        // WebGLに必要なCORSヘッダーを設定
+        Metadata: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, HEAD',
+          'Access-Control-Allow-Headers': 'Content-Type, Content-Encoding'
+        }
       };
+      
+      // 圧縮ファイルの場合はContent-Encodingヘッダーを追加
+      if (contentEncoding) {
+        uploadParams.ContentEncoding = contentEncoding;
+        console.log(`📦 Setting Content-Encoding: ${contentEncoding} for ${relativePath}`);
+      }
 
       uploadPromises.push(r2Client.send(new PutObjectCommand(uploadParams)));
     }
@@ -142,6 +155,14 @@ async function getFilesRecursively(dirPath) {
 
 function getContentType(fileName) {
   const ext = path.extname(fileName).toLowerCase();
+  
+  // .br、.gz圧縮ファイルの場合は、圧縮前の拡張子を見る
+  let actualExt = ext;
+  if (ext === '.br' || ext === '.gz') {
+    const nameWithoutCompression = fileName.replace(/\.(br|gz)$/, '');
+    actualExt = path.extname(nameWithoutCompression).toLowerCase();
+  }
+  
   const contentTypes = {
     '.html': 'text/html',
     '.js': 'application/javascript',
@@ -156,7 +177,18 @@ function getContentType(fileName) {
     '.data': 'application/octet-stream',
     '.unityweb': 'application/octet-stream'
   };
-  return contentTypes[ext] || 'application/octet-stream';
+  
+  return contentTypes[actualExt] || 'application/octet-stream';
+}
+
+function getContentEncoding(fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  if (ext === '.br') {
+    return 'br';
+  } else if (ext === '.gz') {
+    return 'gzip';
+  }
+  return null;
 }
 
 export async function uploadSingleFile({ filePath, prNumber, branch, target = null }) {
